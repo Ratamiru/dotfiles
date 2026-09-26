@@ -30,6 +30,9 @@ Scope {
     property real position: 0
     property real duration: 0
     property bool paused: true
+    // громкость самого mpv (0..100), не системная
+    property real volume: 100
+    property bool muted: false
     readonly property bool playing: player.mpvConnected && !player.paused && player.mpvCount > 0
     property bool mpvConnected: false
     // сколько треков сейчас в плейлисте mpv; 0 — mpv простаивает
@@ -49,6 +52,8 @@ Scope {
     property bool hasSavedState: false
     FileView {
         id: stateFile
+        // файла нет до первого выбора плейлиста — это нормально, не шумим в лог
+        __printErrors: false
         path: Qt.resolvedUrl(Quickshell.shellDir + "/music-state.json")
         onLoaded: {
             try {
@@ -136,6 +141,20 @@ Scope {
         else player.playIndex((player.currentIndex - 1 + player.tracks.length) % player.tracks.length)
     }
 
+    // без подключения к mpv не шлём — иначе set_property поднял бы mpv ради громкости
+    function setVolume(v) {
+        v = Math.max(0, Math.min(100, Math.round(v)))
+        player.volume = v
+        if (player.mpvConnected) {
+            player.send(["set_property", "volume", v])
+            if (player.muted && v > 0) player.send(["set_property", "mute", false])
+        }
+    }
+
+    function toggleMute() {
+        if (player.mpvConnected) player.send(["cycle", "mute"])
+    }
+
     function seek(seconds) {
         player.position = seconds
         player.send(["seek", seconds, "absolute"])
@@ -218,7 +237,7 @@ Scope {
                 player.socket = sock
                 player.mpvConnected = true
                 player.errorText = ""
-                const props = ["time-pos", "duration", "pause", "playlist-pos", "playlist-count"]
+                const props = ["time-pos", "duration", "pause", "playlist-pos", "playlist-count", "volume", "mute"]
                 for (let i = 0; i < props.length; i++) player.send(["observe_property", i + 1, props[i]])
                 const queued = player.pending
                 player.pending = []
@@ -241,6 +260,8 @@ Scope {
         case "duration": player.duration = v ?? 0; break
         case "pause": player.paused = v ?? true; break
         case "playlist-count": player.mpvCount = v ?? 0; break
+        case "volume": player.volume = v ?? 100; break
+        case "mute": player.muted = v ?? false; break
         // -1 когда плейлист доигран — оставляем последний диск по центру
         case "playlist-pos": if (v >= 0) player.currentIndex = v; break
         }

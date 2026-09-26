@@ -58,6 +58,8 @@ Scope {
                 Keys.onSpacePressed: mp.togglePause()
                 Keys.onLeftPressed: mp.previous()
                 Keys.onRightPressed: mp.next()
+                Keys.onUpPressed: mp.setVolume(mp.volume + 5)
+                Keys.onDownPressed: mp.setVolume(mp.volume - 5)
 
                 // появление: лёгкий zoom + fade
                 opacity: 0
@@ -103,6 +105,13 @@ Scope {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 20
+                    player: mp
+                }
+
+                VolumeSlider {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 32
+                    anchors.verticalCenter: arrows.verticalCenter
                     player: mp
                 }
 
