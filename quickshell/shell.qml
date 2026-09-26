@@ -11,4 +11,5 @@ import "./layers" as Lay
     Lay.Notes {}
     Lay.Projects {}
     Lay.LockScreen {}
+    Lay.Music {}
   }

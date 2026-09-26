@@ -16,8 +16,18 @@ layers/
   ToolsMenu.qml           # лаунчер утилит (Super+T)
   Notes.qml                # окно заметок
   Projects.qml              # окно списка проектов
+  Music.qml                 # музыкальный виджет (Super+M), см. раздел «Музыка»
+  music/
+    PlayerState.qml         # состояние плеера + JSON IPC с mpv
+    SubsonicApi.qml         # клиент Navidrome
+    CoverCarousel.qml       # 3D-карусель CD-дисков
+    TrackInfo.qml / SeekBar.qml / NavArrows.qml
+assets/cd/                 # меш и текстуры диска (CC-BY-4.0, см. LICENSE.txt)
+fonts/                     # Orbitron, Rajdhani (OFL)
 projects.json            # список проектов (редактируется руками)
 notes-settings.json       # хранит путь к папке с заметками (не трогать руками)
+music-settings.json       # url/user/password Navidrome — в .gitignore
+music-state.json          # последний выбранный плейлист (не трогать руками)
 ```
 
 ## Горячие клавиши (mango)
@@ -30,6 +40,9 @@ notes-settings.json       # хранит путь к папке с заметк�
 | `XF86AudioRaiseVolume` / `LowerVolume` / `Mute` | Громкость без открытия окна |
 | `Super+T` | Меню утилит |
 | `n` / `p` (при открытом меню утилит) | Заметки / Проекты |
+| `Super+M` | Музыка |
+| `Space` / `←` / `→` (при открытой музыке) | Пауза / Пред. / След. |
+| `XF86AudioPlay` / `Next` / `Prev` | Пауза / След. / Пред. без открытия окна |
 | `Escape` (в любом открытом окне) | Закрыть |
 
 Биндинги — в конце `~/.config/mango/config.conf`. Всё, что делает quickshell, идёт
@@ -53,6 +66,7 @@ quickshell ipc call audiosink toggle
 quickshell ipc call notes activate      # открыть (не toggle!)
 quickshell ipc call projects activate
 quickshell ipc call toolsmenu toggle
+quickshell ipc call music toggle        # и playPause / next / previous
 ```
 ⚠️ `show` как имя IPC-функции не использовать — это зарезервированное слово в CLI
 quickshell (`quickshell ipc show`), вызов молча ничего не сделает. Для "открыть"
@@ -81,6 +95,28 @@ quickshell (`quickshell ipc show`), вызов молча ничего не сд
 - Папка создаётся автоматически при сохранении первой заметки в ней.
 - Автосохранение — через 800мс после последней правки, плюс форс-сохранение при
   переключении файла/папки/закрытии окна.
+
+## Музыка
+
+Navidrome (`http://debian:4533`, tailnet) → mpv. Креды — в `music-settings.json`:
+```json
+{ "url": "http://debian:4533", "user": "...", "password": "..." }
+```
+
+- **mpv** — отдельный процесс (`mpv --idle --input-ipc-server=$XDG_RUNTIME_DIR/mpv-music.sock`),
+  поднимается лениво при первом play. Закрытие окна и даже рестарт quickshell музыку
+  не останавливают — при старте виджет просто переподключается к сокету.
+  Остановить совсем: `pkill -f '^[^ ]*mpv .*mpv-music'`.
+- В mpv загружается **весь** плейлист, поэтому следующий трек mpv включает сам.
+- Выбор плейлиста — кнопка справа сверху; сразу начинает играть с первого трека.
+  «Вся библиотека» — до 500 треков.
+- Клик по соседнему диску — играть его, по центральному — пауза; колесо — листать.
+- Модель диска: `cd disk.glb` → `balsam` → `assets/cd/meshes/disc.mesh`. UV наклейки
+  в исходнике были кусками старого атласа — перед конвертом переписаны на планарную
+  проекцию 0..1 (обложка на весь диск). Текстуры корпуса ужаты до 512×512.
+- Грабли: Quickshell `Socket` после неудачного подключения залипает навсегда
+  (повторный `connected = true` ничего не делает, `destroy()` запрещён) —
+  поэтому сокет живёт в `LazyLoader` и пересоздаётся на каждую попытку.
 
 ## Отладка
 
