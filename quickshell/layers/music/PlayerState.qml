@@ -14,16 +14,33 @@ Scope {
 
     readonly property string socketPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/mpv-music.sock"
 
-    // [{ id, name }] — первым всегда "вся библиотека" (id "")
-    property var sources: [{ id: "", name: "Вся библиотека" }]
+    // [{ id, name }] — сначала встроенные источники, потом плейлисты Navidrome
+    readonly property var builtinSources: [
+        { id: "", name: "Вся библиотека" },
+        { id: "__starred", name: "★ Избранное" }
+    ]
+    property var sources: player.builtinSources
     property string sourceId: ""
     readonly property string sourceName: {
         const s = player.sources.find(s => s.id === player.sourceId)
         return s ? s.name : ""
     }
 
-    // [{ id, title, artist, album, duration, coverUrl, streamUrl }]
+    // [{ id, title, artist, album, duration, created, starred, coverUrl, streamUrl, order }]
+    // order — позиция в исходном плейлисте, для сортировки "как в плейлисте"
     property var tracks: []
+
+    readonly property var sortOptions: [
+        { id: "order", name: "Как в плейлисте" },
+        { id: "title", name: "Название" },
+        { id: "artist", name: "Исполнитель" },
+        { id: "album", name: "Альбом" },
+        { id: "duration", name: "Длительность" },
+        { id: "created", name: "Недавно добавленные" },
+        { id: "random", name: "Случайно" }
+    ]
+    property string sortKey: "order"
+    readonly property string sortName: player.sortOptions.find(o => o.id === player.sortKey)?.name ?? ""
     property int currentIndex: 0
     readonly property var currentTrack: player.tracks[player.currentIndex] ?? null
 
@@ -57,7 +74,9 @@ Scope {
         path: Qt.resolvedUrl(Quickshell.shellDir + "/music-state.json")
         onLoaded: {
             try {
-                player.sourceId = JSON.parse(stateFile.text()).sourceId ?? ""
+                const st = JSON.parse(stateFile.text())
+                player.sourceId = st.sourceId ?? ""
+                player.sortKey = st.sortKey ?? "order"
                 player.hasSavedState = true
             } catch (e) {}
             player.stateLoaded = true
@@ -75,7 +94,7 @@ Scope {
         player.initialized = true
         api.fetchPlaylists(function(list, err) {
             if (err) player.errorText = err
-            player.sources = [{ id: "", name: "Вся библиотека" }].concat(list)
+            player.sources = player.builtinSources.concat(list)
             // первый запуск — по умолчанию первый плейлист, если он есть
             if (!player.hasSavedState && list.length > 0) player.sourceId = list[0].id
             player.fetchTracks(player.sourceId, false)
@@ -90,17 +109,94 @@ Scope {
             player.loading = false
             player.errorText = err
             player.sourceId = id
-            player.tracks = list
+            list.forEach((t, i) => t.order = i)
+            player.tracks = player.sorted(list, player.sortKey)
             if (player.currentIndex >= list.length) player.currentIndex = 0
             if (andPlay && list.length > 0) player.loadIntoMpv(0)
         })
     }
 
+    function saveState() {
+        stateFile.setText(JSON.stringify({ sourceId: player.sourceId, sortKey: player.sortKey }))
+    }
+
     // Выбор плейлиста в шапке — сразу загружаем и играем с первого трека
     function playSource(id) {
-        stateFile.setText(JSON.stringify({ sourceId: id }))
+        player.sourceId = id
+        player.saveState()
         player.currentIndex = 0
         player.fetchTracks(id, true)
+    }
+
+    // ---------- сортировка ----------
+
+    function sorted(list, key) {
+        const out = list.slice()
+        const text = f => (a, b) => (a[f] || "").localeCompare(b[f] || "", undefined, { sensitivity: "base" })
+        switch (key) {
+        case "title": out.sort(text("title")); break
+        case "artist": out.sort((a, b) => text("artist")(a, b) || text("album")(a, b) || a.order - b.order); break
+        case "album": out.sort((a, b) => text("album")(a, b) || a.order - b.order); break
+        case "duration": out.sort((a, b) => a.duration - b.duration); break
+        case "created": out.sort((a, b) => (b.created || "").localeCompare(a.created || "")); break
+        case "random":
+            for (let i = out.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [out[i], out[j]] = [out[j], out[i]]
+            }
+            break
+        default: out.sort((a, b) => a.order - b.order)
+        }
+        return out
+    }
+
+    // Пересортировка не прерывает играющий трек: playlist-clear в mpv оставляет
+    // текущий файл, дописываем остальные в новом порядке и ставим текущий на место.
+    function setSort(key) {
+        player.sortKey = key
+        player.saveState()
+        const cur = player.currentTrack
+        const list = player.sorted(player.tracks, key)
+        const k = cur ? list.indexOf(cur) : 0
+        const mpvHasThisList = player.mpvCount > 0 && player.mpvCount === list.length
+        player.tracks = list
+        player.currentIndex = Math.max(0, k)
+        if (!mpvHasThisList || !cur) return
+        player.send(["playlist-clear"])
+        for (const t of list) if (t !== cur) player.send(["loadfile", t.streamUrl, "append"])
+        if (k > 0) player.send(["playlist-move", 0, k + 1])
+    }
+
+    // mpv — главный по порядку: после рестарта quickshell (или "случайно")
+    // порядок в виджете мог разойтись с реально играющим — подстраиваемся под mpv.
+    function syncOrderFromMpv(entries) {
+        if (!entries || entries.length !== player.tracks.length || entries.length === 0) return
+        const byId = {}
+        for (const t of player.tracks) byId[t.id] = t
+        const ordered = []
+        for (const e of entries) {
+            const m = /[?&]id=([^&]+)/.exec(e.filename ?? "")
+            const t = m ? byId[decodeURIComponent(m[1])] : null
+            if (!t) return  // в mpv другой плейлист — не трогаем
+            ordered.push(t)
+        }
+        if (ordered.every((t, i) => t === player.tracks[i])) return
+        player.tracks = ordered
+    }
+
+    // ---------- избранное ----------
+
+    function toggleStar() {
+        const cur = player.currentTrack
+        if (!cur) return
+        const want = !cur.starred
+        api.setStarred(cur.id, want, function(ok, err) {
+            if (!ok) { player.errorText = err; return }
+            // tracks — обычный JS-массив: мутируем объект и переприсваиваем копию,
+            // чтобы биндинги (сердечко) узнали об изменении
+            cur.starred = want
+            player.tracks = player.tracks.slice()
+        })
     }
 
     // ---------- управление ----------
@@ -237,7 +333,7 @@ Scope {
                 player.socket = sock
                 player.mpvConnected = true
                 player.errorText = ""
-                const props = ["time-pos", "duration", "pause", "playlist-pos", "playlist-count", "volume", "mute"]
+                const props = ["time-pos", "duration", "pause", "playlist-pos", "playlist-count", "volume", "mute", "playlist"]
                 for (let i = 0; i < props.length; i++) player.send(["observe_property", i + 1, props[i]])
                 const queued = player.pending
                 player.pending = []
@@ -262,6 +358,7 @@ Scope {
         case "playlist-count": player.mpvCount = v ?? 0; break
         case "volume": player.volume = v ?? 100; break
         case "mute": player.muted = v ?? false; break
+        case "playlist": player.syncOrderFromMpv(v); break
         // -1 когда плейлист доигран — оставляем последний диск по центру
         case "playlist-pos": if (v >= 0) player.currentIndex = v; break
         }

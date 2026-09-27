@@ -79,6 +79,8 @@ Scope {
             artist: song.displayArtist ?? song.artist ?? "",
             album: song.album ?? "",
             duration: song.duration ?? 0,
+            created: song.created ?? "",
+            starred: !!song.starred,
             coverUrl: api.coverUrl(song.coverArt),
             streamUrl: api.streamUrl(song.id)
         }
@@ -93,9 +95,14 @@ Scope {
         })
     }
 
-    // id === "" — вся библиотека (пустой search3 в Navidrome отдаёт все треки)
+    // id === "" — вся библиотека (пустой search3 в Navidrome отдаёт все треки),
+    // "__starred" — избранное (звёздочки в Navidrome)
     function fetchTracks(id, callback) {
-        if (id === "") {
+        if (id === "__starred") {
+            api.request("getStarred2", {}, function(r, err) {
+                callback(r ? (r.starred2?.song ?? []).map(api.toTrack) : [], err)
+            })
+        } else if (id === "") {
             api.request("search3", { query: "", songCount: 500, albumCount: 0, artistCount: 0 }, function(r, err) {
                 callback(r ? (r.searchResult3?.song ?? []).map(api.toTrack) : [], err)
             })
@@ -104,5 +111,12 @@ Scope {
                 callback(r ? (r.playlist?.entry ?? []).map(api.toTrack) : [], err)
             })
         }
+    }
+
+    // callback(ok, errorText)
+    function setStarred(id, starred, callback) {
+        api.request(starred ? "star" : "unstar", { id: id }, function(r, err) {
+            callback(!!r, err)
+        })
     }
 }

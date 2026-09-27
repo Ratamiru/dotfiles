@@ -60,6 +60,9 @@ Scope {
                 Keys.onRightPressed: mp.next()
                 Keys.onUpPressed: mp.setVolume(mp.volume + 5)
                 Keys.onDownPressed: mp.setVolume(mp.volume - 5)
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_F) mp.toggleStar()
+                }
 
                 // появление: лёгкий zoom + fade
                 opacity: 0
@@ -71,13 +74,13 @@ Scope {
                 // съедаем клик по самой карточке
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: sourceMenu.visible = false
+                    onClicked: { sourceMenu.close(); sortMenu.close() }
                 }
 
                 TrackInfo {
                     x: 32
                     y: 26
-                    width: sourceButton.x - x - 24
+                    width: header.x - x - 24
                     player: mp
                     titleFont: orbitron.name
                     bodyFont: rajdhani.name
@@ -115,103 +118,60 @@ Scope {
                     player: mp
                 }
 
-                // выбор плейлиста
-                Rectangle {
-                    id: sourceButton
+                // шапка справа: избранное, сортировка, источник
+                Row {
+                    id: header
                     anchors.right: parent.right
                     anchors.rightMargin: 24
                     y: 26
-                    width: Math.min(220, sourceLabel.implicitWidth + 44)
-                    height: 32
-                    radius: height / 2
-                    color: sourceArea.containsMouse ? "#2a2a3a" : "transparent"
-                    border.color: "#3a3a4e"
-                    border.width: 1
+                    spacing: 8
+                    z: 20
 
-                    Text {
-                        id: sourceLabel
-                        anchors.left: parent.left
-                        anchors.leftMargin: 14
-                        anchors.right: parent.right
-                        anchors.rightMargin: 30
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: mp.sourceName || "—"
-                        color: "#cccccc"
-                        font.family: rajdhani.name
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        anchors.right: parent.right
-                        anchors.rightMargin: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "⌄"
-                        color: "#cccccc"
-                        font.pixelSize: 14
-                    }
-                    MouseArea {
-                        id: sourceArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: sourceMenu.visible = !sourceMenu.visible
-                    }
-                }
-
-                Rectangle {
-                    id: sourceMenu
-                    visible: false
-                    z: 10
-                    anchors.right: sourceButton.right
-                    anchors.top: sourceButton.bottom
-                    anchors.topMargin: 6
-                    width: 240
-                    height: Math.min(260, sourceList.contentHeight + 12)
-                    radius: 14
-                    color: "#1e1e2e"
-                    border.color: "#3a3a4e"
-                    border.width: 1
-
-                    ListView {
-                        id: sourceList
-                        anchors.fill: parent
-                        anchors.margins: 6
-                        clip: true
-                        spacing: 2
-                        model: mp.sources
-                        boundsBehavior: Flickable.StopAtBounds
-
-                        delegate: Rectangle {
-                            id: sourceItem
-                            required property var modelData
-                            width: sourceList.width
-                            height: 36
-                            radius: 10
-                            color: sourceItem.modelData.id === mp.sourceId
-                                ? "#7c8cff"
-                                : (itemArea.containsMouse ? "#2a2a3a" : "transparent")
-                            Text {
-                                anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                verticalAlignment: Text.AlignVCenter
-                                text: sourceItem.modelData.name
-                                color: "white"
-                                font.family: rajdhani.name
-                                font.pixelSize: 16
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
-                            }
-                            MouseArea {
-                                id: itemArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    sourceMenu.visible = false
-                                    mp.playSource(sourceItem.modelData.id)
-                                }
-                            }
+                    // сердечко — звёздочка текущего трека в Navidrome
+                    Rectangle {
+                        width: 32
+                        height: 32
+                        radius: 16
+                        visible: mp.currentTrack !== null
+                        color: heartArea.containsMouse ? "#2a2a3a" : "transparent"
+                        border.color: "#3a3a4e"
+                        border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: mp.currentTrack?.starred ? "\u{f02d1}" : "\u{f02d5}"
+                            color: mp.currentTrack?.starred ? "#ff7c9c" : "#cccccc"
+                            font.family: "Symbols Nerd Font"
+                            font.pixelSize: 16
                         }
+                        MouseArea {
+                            id: heartArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: mp.toggleStar()
+                        }
+                    }
+
+                    PillMenu {
+                        id: sortMenu
+                        icon: "\u{f04ba}"
+                        label: mp.sortName
+                        maxWidth: 200
+                        model: mp.sortOptions
+                        currentId: mp.sortKey
+                        fontFamily: rajdhani.name
+                        onOpenedChanged: if (opened) sourceMenu.close()
+                        onPicked: key => mp.setSort(key)
+                    }
+
+                    PillMenu {
+                        id: sourceMenu
+                        label: mp.sourceName
+                        maxWidth: 200
+                        model: mp.sources
+                        currentId: mp.sourceId
+                        fontFamily: rajdhani.name
+                        onOpenedChanged: if (opened) sortMenu.close()
+                        onPicked: key => mp.playSource(key)
                     }
                 }
             }
